@@ -15,6 +15,14 @@ import type {
   PaymentsResponse,
 } from './types';
 
+const NAV_ITEMS: { id: AdminTab; label: string; icon: string }[] = [
+  { id: 'overview', label: 'Overview', icon: '◉' },
+  { id: 'users', label: 'Users', icon: '◎' },
+  { id: 'payments', label: 'Payments', icon: '◈' },
+  { id: 'consents', label: 'Consents', icon: '◇' },
+  { id: 'audit', label: 'Audit', icon: '▣' },
+];
+
 export default function App() {
   const [token, setToken] = useState('');
   const [email, setEmail] = useState('');
@@ -111,7 +119,6 @@ export default function App() {
       setError('Enter admin token and admin email.');
       return;
     }
-
     setIsAuthorized(true);
   };
 
@@ -139,6 +146,8 @@ export default function App() {
     }
   };
 
+  const closeUserDetail = () => setUserDetail(null);
+
   const grantSubscription = async (event: FormEvent) => {
     event.preventDefault();
     if (!grantModalUserId) return;
@@ -156,10 +165,7 @@ export default function App() {
       setMutationBusy(true);
       await adminFetch(`/users/${grantModalUserId}/subscription`, config, {
         method: 'PATCH',
-        body: JSON.stringify({
-          duration_days: durationDays,
-          plan_id: planId,
-        }),
+        body: JSON.stringify({ duration_days: durationDays, plan_id: planId }),
       });
       await openUser(grantModalUserId);
       await loadCurrentTabData('users');
@@ -186,115 +192,142 @@ export default function App() {
     }
   };
 
-  return (
-    <div className="app-shell">
-      <header className="topbar panel">
-        <div>
-          <h1>SmartWord Admin</h1>
-          <p className="muted">Single-admin console with hardened access and audit trail.</p>
-        </div>
-        {isAuthorized && (
-          <button type="button" className="ghost" onClick={() => void loadCurrentTabData(tab)}>
-            Refresh current view
-          </button>
-        )}
-      </header>
-
-      {!isAuthorized && (
-        <form className="panel auth-card" onSubmit={onAuthSubmit}>
+  if (!isAuthorized) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
           <h2>Admin Access</h2>
-          <label className="field">
-            <span>Admin API token</span>
-            <input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              type="password"
-              placeholder="Paste ADMIN_API_TOKEN"
-              autoComplete="off"
-            />
-          </label>
-          <label className="field">
-            <span>Admin email</span>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              placeholder="admin@localhost"
-              autoComplete="off"
-            />
-          </label>
-          <button type="submit">Connect</button>
-        </form>
-      )}
+          <p>Sign in to your admin console</p>
+          {error && <div className="error-banner">{error}</div>}
+          <form onSubmit={onAuthSubmit}>
+            <div className="form-group">
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                className="form-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                placeholder="admin@example.com"
+                autoComplete="off"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="token">API Token</label>
+              <input
+                id="token"
+                className="form-input"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                type="password"
+                placeholder="Enter your admin token"
+                autoComplete="off"
+              />
+            </div>
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>
+              Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
-      {isAuthorized && (
-        <>
-          <nav className="tabs">
-            {(['overview', 'users', 'payments', 'consents', 'audit'] as AdminTab[]).map((item) => (
-              <button
-                key={item}
-                className={tab === item ? 'active' : ''}
-                onClick={() => setTab(item)}
-              >
-                {item}
-              </button>
-            ))}
-          </nav>
+  return (
+    <div className="app-layout">
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <div className="sidebar-logo-icon">S</div>
+          SmartWord
+        </div>
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              className={`nav-item ${tab === item.id ? 'active' : ''}`}
+              onClick={() => setTab(item.id)}
+            >
+              <span className="nav-item-icon">{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="text-sm text-muted">{email}</div>
+        </div>
+      </aside>
 
-          {error && <div className="error">{error}</div>}
-          {tab === 'overview' && <OverviewTab overview={overview} isLoading={loadingByTab.overview} />}
-          {tab === 'users' && (
-            <UsersTab
-              users={users}
-              search={search}
-              onSearchChange={setSearch}
-              onSearchSubmit={onSearchUsers}
-              onPageChange={setUsersPage}
-              onOpenUser={openUser}
-              isLoading={loadingByTab.users}
-              openUserId={openUserId}
-            />
-          )}
-          {tab === 'payments' && <PaymentsTab data={payments} isLoading={loadingByTab.payments} />}
-          {tab === 'consents' && <ConsentsTab data={consents} isLoading={loadingByTab.consents} />}
-          {tab === 'audit' && <AuditTab data={audit} isLoading={loadingByTab.audit} />}
+      <main className="main-content">
+        <div className="topbar">
+          <h1>{NAV_ITEMS.find((n) => n.id === tab)?.label ?? 'Admin'}</h1>
+          <div className="topbar-actions">
+            <button className="btn btn-ghost" onClick={() => void loadCurrentTabData(tab)}>
+              ↻ Refresh
+            </button>
+          </div>
+        </div>
 
-          <UserDetailPanel
-            userDetail={userDetail}
-            onGrantSubscription={(userId) => setGrantModalUserId(userId)}
-            onResetWeeklyLimit={resetWeeklyLimit}
-            mutationBusy={mutationBusy}
+        {error && <div className="error-banner">{error}</div>}
+
+        {tab === 'overview' && <OverviewTab overview={overview} isLoading={loadingByTab.overview} />}
+        {tab === 'users' && (
+          <UsersTab
+            users={users}
+            search={search}
+            onSearchChange={setSearch}
+            onSearchSubmit={onSearchUsers}
+            onPageChange={setUsersPage}
+            onOpenUser={openUser}
+            isLoading={loadingByTab.users}
+            openUserId={openUserId}
           />
-        </>
+        )}
+        {tab === 'payments' && <PaymentsTab data={payments} isLoading={loadingByTab.payments} />}
+        {tab === 'consents' && <ConsentsTab data={consents} isLoading={loadingByTab.consents} />}
+        {tab === 'audit' && <AuditTab data={audit} isLoading={loadingByTab.audit} />}
+      </main>
+
+      {userDetail && (
+        <UserDetailPanel
+          userDetail={userDetail}
+          onClose={closeUserDetail}
+          onGrantSubscription={(userId) => setGrantModalUserId(userId)}
+          onResetWeeklyLimit={resetWeeklyLimit}
+          mutationBusy={mutationBusy}
+        />
       )}
 
       {grantModalUserId && (
         <Modal
-          title="Grant subscription"
-          confirmLabel="Apply subscription"
+          title="Grant Subscription"
+          confirmLabel="Apply"
           onCancel={() => setGrantModalUserId(null)}
           onConfirm={grantSubscription}
           isBusy={mutationBusy}
           isConfirmDisabled={!grantPlanId.trim() || !grantDurationDays.trim()}
         >
-          <label className="field">
-            <span>Duration days</span>
+          <div className="form-group">
+            <label htmlFor="duration">Duration (days)</label>
             <input
+              id="duration"
+              className="form-input"
               value={grantDurationDays}
               onChange={(e) => setGrantDurationDays(e.target.value)}
               type="number"
               min={1}
               max={3650}
             />
-          </label>
-          <label className="field">
-            <span>Plan id</span>
+          </div>
+          <div className="form-group">
+            <label htmlFor="planId">Plan ID</label>
             <input
+              id="planId"
+              className="form-input"
               value={grantPlanId}
               onChange={(e) => setGrantPlanId(e.target.value)}
               placeholder="manual"
             />
-          </label>
+          </div>
         </Modal>
       )}
     </div>

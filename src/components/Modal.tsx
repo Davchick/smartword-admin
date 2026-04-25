@@ -22,15 +22,15 @@ export function Modal({
   isConfirmDisabled = false,
 }: ModalProps) {
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop" role="presentation" onClick={(e) => e.target === e.currentTarget && onCancel()}>
       <form className="modal-card" onSubmit={onConfirm} aria-modal="true" role="dialog">
         <h3>{title}</h3>
-        <div className="modal-content">{children}</div>
-        <div className="row">
-          <button type="button" className="ghost" onClick={onCancel} disabled={isBusy}>
+        <div>{children}</div>
+        <div className="modal-actions">
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={isBusy}>
             {cancelLabel}
           </button>
-          <button type="submit" disabled={isBusy || isConfirmDisabled}>
+          <button type="submit" className="btn btn-primary" disabled={isBusy || isConfirmDisabled}>
             {isBusy ? 'Working...' : confirmLabel}
           </button>
         </div>

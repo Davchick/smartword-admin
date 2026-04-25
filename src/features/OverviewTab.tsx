@@ -1,11 +1,11 @@
 import type { AdminOverview } from '../types';
 
-function Metric({ title, value }: { title: string; value: string | number }) {
+function MetricCard({ label, value }: { label: string; value: string | number }) {
   return (
-    <article className="panel metric">
-      <div className="muted">{title}</div>
-      <div className="metric-value">{value}</div>
-    </article>
+    <div className="metric-card">
+      <div className="metric-card-label">{label}</div>
+      <div className="metric-card-value">{value}</div>
+    </div>
   );
 }
 
@@ -16,22 +16,24 @@ type Props = {
 
 export function OverviewTab({ overview, isLoading }: Props) {
   if (isLoading) {
-    return <section className="panel muted">Loading overview...</section>;
+    return <div className="loading-state">Loading overview...</div>;
   }
   if (!overview) {
-    return <section className="panel muted">No data yet.</section>;
+    return <div className="empty-state">No data available</div>;
   }
 
   return (
-    <section className="metric-grid">
-      <Metric title="Total users" value={overview.users_total} />
-      <Metric title="New users 7d" value={overview.users_new_7d} />
-      <Metric title="Verified users" value={overview.users_verified} />
-      <Metric title="Active premium" value={overview.users_premium_active} />
-      <Metric title="Total words" value={overview.words_total} />
-      <Metric title="Total groups" value={overview.groups_total} />
-      <Metric title="Payments total" value={overview.payments_total} />
-      <Metric title="Revenue 30d (RUB)" value={overview.revenue_30d_rub.toFixed(2)} />
-    </section>
+    <div>
+      <div className="metrics-grid">
+        <MetricCard label="Total Users" value={overview.users_total.toLocaleString()} />
+        <MetricCard label="New Users (7d)" value={overview.users_new_7d.toLocaleString()} />
+        <MetricCard label="Verified Users" value={overview.users_verified.toLocaleString()} />
+        <MetricCard label="Active Premium" value={overview.users_premium_active.toLocaleString()} />
+        <MetricCard label="Total Words" value={overview.words_total.toLocaleString()} />
+        <MetricCard label="Total Groups" value={overview.groups_total.toLocaleString()} />
+        <MetricCard label="Payments Total" value={overview.payments_total.toLocaleString()} />
+        <MetricCard label="Revenue (30d)" value={`₽${overview.revenue_30d_rub.toFixed(0)}`} />
+      </div>
+    </div>
   );
 }

@@ -13,8 +13,8 @@ type Props = {
 };
 
 function formatDate(value: string | null): string {
-  if (!value) return '-';
-  return new Date(value).toLocaleString();
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export function UsersTab({
@@ -30,82 +30,89 @@ export function UsersTab({
   const totalPages = users ? Math.max(1, Math.ceil(users.total / users.page_size)) : 1;
 
   return (
-    <section className="panel">
-      <form onSubmit={onSearchSubmit} className="row">
-        <label className="field">
-          <span>Search user</span>
-          <input
-            value={search}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Email or user id"
-          />
-        </label>
-        <button type="submit" disabled={isLoading}>Search</button>
+    <div>
+      <form onSubmit={onSearchSubmit} className="search-bar">
+        <input
+          className="form-input"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search by email or user ID..."
+        />
+        <button type="submit" className="btn btn-primary" disabled={isLoading}>Search</button>
       </form>
 
-      {isLoading && <div className="muted">Loading users...</div>}
-
-      <div className="table-wrap">
+      <div className="table-container">
+        {isLoading && <div className="loading-state">Loading users...</div>}
         <table>
           <thead>
             <tr>
               <th>Email</th>
               <th>Created</th>
               <th>Premium</th>
-              <th>Words/week</th>
-              <th>Actions</th>
+              <th>Words / Week</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {users?.users.length ? (
               users.users.map((user) => (
                 <tr key={user.id}>
-                  <td>{user.email}</td>
-                  <td>{formatDate(user.created_at)}</td>
-                  <td>{user.is_premium_active ? 'Yes' : 'No'}</td>
-                  <td>{user.words_learned_this_week}</td>
+                  <td style={{ fontWeight: 500 }}>{user.email}</td>
+                  <td className="text-muted">{formatDate(user.created_at)}</td>
+                  <td>
+                    <span className={`status-badge ${user.is_premium_active ? 'active' : 'inactive'}`}>
+                      {user.is_premium_active ? '●' : '○'} {user.is_premium_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="text-muted">{user.words_learned_this_week}</td>
                   <td>
                     <button
                       type="button"
-                      className="ghost"
+                      className="btn btn-ghost"
                       disabled={openUserId === user.id}
                       onClick={() => onOpenUser(user.id)}
+                      style={{ padding: '6px 12px', fontSize: '13px' }}
                     >
-                      {openUserId === user.id ? 'Opening...' : 'Open'}
+                      {openUserId === user.id ? 'Opening...' : 'View'}
                     </button>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={5} className="muted">No users found.</td>
+                <td colSpan={5} className="empty-state">No users found</td>
               </tr>
             )}
           </tbody>
         </table>
+        {users && users.total > 0 && (
+          <div className="pagination">
+            <span className="pagination-info">
+              Page {users.page} of {totalPages} · {users.total.toLocaleString()} users
+            </span>
+            <div className="pagination-controls">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={users.page <= 1 || isLoading}
+                onClick={() => onPageChange(users.page - 1)}
+                style={{ padding: '6px 12px', fontSize: '13px' }}
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={users.page >= totalPages || isLoading}
+                onClick={() => onPageChange(users.page + 1)}
+                style={{ padding: '6px 12px', fontSize: '13px' }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-
-      <div className="row pagination">
-        <button
-          type="button"
-          className="ghost"
-          disabled={!users || users.page <= 1 || isLoading}
-          onClick={() => users && onPageChange(users.page - 1)}
-        >
-          Previous
-        </button>
-        <span className="muted">
-          Page {users?.page ?? 1} / {totalPages}
-        </span>
-        <button
-          type="button"
-          className="ghost"
-          disabled={!users || users.page >= totalPages || isLoading}
-          onClick={() => users && onPageChange(users.page + 1)}
-        >
-          Next
-        </button>
-      </div>
-    </section>
+    </div>
   );
 }
