@@ -1,335 +1,783 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { adminFetch } from './api';
-import { Modal } from './components/Modal';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { LayoutDashboard, Users, CreditCard, FileText, Search, MessageSquare, Bug } from 'lucide-react';
+
+import { useAdminAuth, useGlobalSearch } from './hooks/useAdminAuth';
+import { useAdminData } from './hooks/useAdminData';
+import { useAdminMutations } from './hooks/useAdminMutations';
+import { useAdminUI, Toast } from './hooks/useAdminUI';
 import { OverviewTab } from './features/OverviewTab';
 import { UsersTab } from './features/UsersTab';
 import { AuditTab, ConsentsTab, PaymentsTab } from './features/DataTableTabs';
+import { TicketsTab, ErrorLogsTab } from './features/SupportTabs';
 import { UserDetailPanel } from './features/UserDetailPanel';
-import type {
-  AdminAuditResponse,
-  AdminOverview,
-  AdminTab,
-  AdminUserDetail,
-  AdminUsersResponse,
-  ConsentsResponse,
-  PaymentsResponse,
-} from './types';
+import { GlobalSearchModal } from './components/GlobalSearchModal';
+import type { AdminTab } from './types';
 
-const NAV_ITEMS: { id: AdminTab; label: string; icon: string }[] = [
-  { id: 'overview', label: 'Overview', icon: '◉' },
-  { id: 'users', label: 'Users', icon: '◎' },
-  { id: 'payments', label: 'Payments', icon: '◈' },
-  { id: 'consents', label: 'Consents', icon: '◇' },
-  { id: 'audit', label: 'Audit', icon: '▣' },
+const NAV_ITEMS: { id: AdminTab; label: string; Icon: typeof LayoutDashboard }[] = [
+  { id: 'overview', label: 'Обзор', Icon: LayoutDashboard },
+  { id: 'users', label: 'Пользователи', Icon: Users },
+  { id: 'payments', label: 'Платежи', Icon: CreditCard },
+  { id: 'consents', label: 'Согласия', Icon: FileText },
+  { id: 'audit', label: 'Аудит', Icon: Search },
+  { id: 'tickets', label: 'Поддержка', Icon: MessageSquare },
+  { id: 'errorLogs', label: 'Ошибки', Icon: Bug },
 ];
 
-export default function App() {
-  const [token, setToken] = useState('');
-  const [email, setEmail] = useState('');
-  const [isAuthorized, setIsAuthorized] = useState(false);
-  const [tab, setTab] = useState<AdminTab>('overview');
-  const [loadingByTab, setLoadingByTab] = useState<Record<AdminTab, boolean>>({
-    overview: false,
-    users: false,
-    payments: false,
-    consents: false,
-    audit: false,
-  });
-  const [error, setError] = useState('');
-  const [mutationBusy, setMutationBusy] = useState(false);
+const STORAGE_TAB_KEY = 'adminTab';
 
-  const [overview, setOverview] = useState<AdminOverview | null>(null);
-  const [users, setUsers] = useState<AdminUsersResponse | null>(null);
-  const [userDetail, setUserDetail] = useState<AdminUserDetail | null>(null);
-  const [payments, setPayments] = useState<PaymentsResponse | null>(null);
-  const [consents, setConsents] = useState<ConsentsResponse | null>(null);
-  const [audit, setAudit] = useState<AdminAuditResponse | null>(null);
+function saveStoredTab(tab: AdminTab): void {
+  try {
+    localStorage.setItem(STORAGE_TAB_KEY, tab);
+  } catch {
+    // ignore
+  }
+}
+
+export default function App() {
+  const { email, token, isAuthorized, login, logout } = useAdminAuth();
+  const config = useMemo(() => ({ token, email }), [token, email]);
+  const {
+    tab,
+    setTab,
+    period,
+    setPeriod,
+    overview,
+    users,
+    payments,
+    consents,
+    audit,
+    tickets,
+    errorLogs,
+    userDetail,
+    userWords,
+    userGroups,
+    userPayments,
+    fetchOverview,
+    fetchUsers,
+    fetchPayments,
+    fetchConsents,
+    fetchAudit,
+    fetchTickets,
+    fetchErrorLogs,
+    fetchUserDetail,
+    fetchUserWords,
+    fetchUserGroups,
+    fetchUserPayments,
+    loadCurrentTab,
+  } = useAdminData({ config, defaultPeriod: '30d' });
+  const { isBusy: mutationBusy, lastError, updateUserEmail, grantSubscription, resetWeeklyLimit, bulkGrantSubscription } = useAdminMutations(config);
+  const { isSearchOpen, openSearch, closeSearch, toasts, showSuccess, showError, removeToast } = useAdminUI({
+    defaultTab: 'overview',
+  });
+  const { query, setQuery, results, isLoading: searchLoading, error: searchError, search: performSearch, searchType, setSearchType } = useGlobalSearch(config);
+
   const [search, setSearch] = useState('');
   const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize] = useState(20);
   const [openUserId, setOpenUserId] = useState<string | null>(null);
   const [grantModalUserId, setGrantModalUserId] = useState<string | null>(null);
   const [grantDurationDays, setGrantDurationDays] = useState('30');
   const [grantPlanId, setGrantPlanId] = useState('manual');
-  const requestsRef = useRef<Record<string, AbortController>>({});
 
-  const config = useMemo(() => ({ token, email }), [token, email]);
+  const [usersFilters, setUsersFilters] = useState<{
+  isPremium?: boolean;
+  createdAfter?: string;
+  createdBefore?: string;
+  hasActivity?: boolean;
+  hasWords?: boolean;
+  hasGroups?: boolean;
+  verified?: boolean;
+  lastActiveAfter?: string;
+  lastActiveBefore?: string;
+  wordsLearnedMin?: number;
+  wordsLearnedMax?: number;
+}>({});
+  const [paymentsPage, setPaymentsPage] = useState(1);
+  const [paymentsSearch, setPaymentsSearch] = useState('');
+  const [paymentsStatus, setPaymentsStatus] = useState<string | undefined>();
+  const [consentsPage, setConsentsPage] = useState(1);
+  const [consentsSearch, setConsentsSearch] = useState('');
+  const [consentsType, setConsentsType] = useState<string | undefined>();
+  const [consentsGranted, setConsentsGranted] = useState<boolean | undefined>();
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditSearch, setAuditSearch] = useState('');
+  const [auditAction, setAuditAction] = useState<string | undefined>();
+  const [auditOutcome, setAuditOutcome] = useState<string | undefined>();
+  const [ticketsPage, setTicketsPage] = useState(1);
+  const [ticketsSearch, setTicketsSearch] = useState('');
+  const [ticketsStatus, setTicketsStatus] = useState<string | undefined>();
+  const [ticketsPriority, setTicketsPriority] = useState<string | undefined>();
+  const [errorLogsPage, setErrorLogsPage] = useState(1);
+  const [errorLogsSearch, setErrorLogsSearch] = useState('');
+  const [errorLogsType, setErrorLogsType] = useState<string | undefined>();
+  const [errorLogsResolved, setErrorLogsResolved] = useState<boolean | undefined>();
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [savedFilters, setSavedFilters] = useState<Array<{ id: string; name: string; filters: typeof usersFilters }>>([]);
+  const [, setOverviewFilter] = useState<{ type: 'premium' | 'verified' | 'new'; value?: boolean } | null>(null);
 
-  function setTabLoading(activeTab: AdminTab, isLoading: boolean) {
-    setLoadingByTab((prev) => ({ ...prev, [activeTab]: isLoading }));
-  }
-
-  function withAbortableKey(key: string): AbortController {
-    requestsRef.current[key]?.abort();
-    const controller = new AbortController();
-    requestsRef.current[key] = controller;
-    return controller;
-  }
-
-  const loadCurrentTabData = useCallback(async (activeTab: AdminTab) => {
-    setTabLoading(activeTab, true);
-    setError('');
-    try {
-      if (activeTab === 'overview') {
-        const controller = withAbortableKey('overview');
-        setOverview(await adminFetch<AdminOverview>('/overview', config, { signal: controller.signal }));
-      }
-      if (activeTab === 'users') {
-        const controller = withAbortableKey('users');
-        setUsers(await adminFetch<AdminUsersResponse>(
-          `/users?page=${usersPage}&pageSize=20&search=${encodeURIComponent(search)}`,
-          config,
-          { signal: controller.signal },
-        ));
-      }
-      if (activeTab === 'payments') {
-        const controller = withAbortableKey('payments');
-        setPayments(await adminFetch<PaymentsResponse>('/payments?limit=100', config, { signal: controller.signal }));
-      }
-      if (activeTab === 'consents') {
-        const controller = withAbortableKey('consents');
-        setConsents(await adminFetch<ConsentsResponse>('/consents?limit=100', config, { signal: controller.signal }));
-      }
-      if (activeTab === 'audit') {
-        const controller = withAbortableKey('audit');
-        setAudit(await adminFetch<AdminAuditResponse>('/audit?limit=100', config, { signal: controller.signal }));
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setTabLoading(activeTab, false);
-    }
-  }, [config, search, usersPage]);
+  useEffect(() => {
+    saveStoredTab(tab);
+  }, [tab]);
 
   useEffect(() => {
     if (!isAuthorized) return;
-    void loadCurrentTabData(tab);
-  }, [tab, isAuthorized, loadCurrentTabData]);
+    void loadCurrentTab();
+  }, [tab, isAuthorized, loadCurrentTab]);
 
   useEffect(() => {
-    const activeControllers = requestsRef.current;
-    return () => {
-      Object.values(activeControllers).forEach((controller) => controller.abort());
-    };
+    if (!isAuthorized || tab !== 'overview') return;
+    void fetchOverview(period);
+    setLastRefreshed(new Date());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, isAuthorized, tab]);
+
+  useEffect(() => {
+    if (!isAuthorized || tab !== 'payments') return;
+    void fetchPayments(paymentsPage, 20, period, paymentsSearch || undefined, paymentsStatus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthorized, paymentsPage, period, paymentsSearch, paymentsStatus]);
+
+  useEffect(() => {
+    if (!isAuthorized || tab !== 'consents') return;
+    void fetchConsents(consentsPage, 20, period, consentsSearch || undefined, consentsType, consentsGranted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthorized, consentsPage, period, consentsSearch, consentsType, consentsGranted]);
+
+  useEffect(() => {
+    if (!isAuthorized || tab !== 'audit') return;
+    void fetchAudit(auditPage, 20, period, auditSearch || undefined, auditAction, auditOutcome);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthorized, auditPage, period, auditSearch, auditAction, auditOutcome]);
+
+  useEffect(() => {
+    if (!isAuthorized || tab !== 'tickets') return;
+    void fetchTickets(ticketsPage, 20, period, ticketsSearch || undefined, ticketsStatus, ticketsPriority);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthorized, ticketsPage, period, ticketsSearch, ticketsStatus, ticketsPriority]);
+
+  useEffect(() => {
+    if (!isAuthorized || tab !== 'errorLogs') return;
+    void fetchErrorLogs(errorLogsPage, 20, period, errorLogsSearch || undefined, errorLogsType, errorLogsResolved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isAuthorized, errorLogsPage, period, errorLogsSearch, errorLogsType, errorLogsResolved]);
+
+  useEffect(() => {
+    if (!autoRefresh || !isAuthorized) return;
+    const interval = setInterval(() => {
+      void loadCurrentTab(true);
+      setLastRefreshed(new Date());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, isAuthorized, loadCurrentTab]);
+
+  const handleTabChange = useCallback((newTab: AdminTab) => {
+    setTab(newTab);
+    setOverviewFilter(null);
+  }, [setTab]);
+
+  const handleOverviewMetricClick = useCallback((filter: { type: 'premium' | 'verified' | 'new'; value?: boolean }) => {
+    setOverviewFilter(filter);
+    setTab('users');
+    if (filter.type === 'premium') {
+      setUsersFilters((prev) => ({ ...prev, isPremium: filter.value ?? true }));
+    } else {
+      setUsersFilters({});
+    }
+  }, [setTab]);
+
+  const handleSearchUsers = useCallback(async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    setUsersPage(1);
+    await fetchUsers(1, usersPageSize, search, usersFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchUsers, search, usersPageSize]);
+
+  const handleUsersPageChange = useCallback(async (page: number) => {
+    setUsersPage(page);
+    await fetchUsers(page, usersPageSize, search, usersFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchUsers, search, usersPageSize]);
+
+  const handleUsersFiltersChange = useCallback(async (filters: typeof usersFilters) => {
+    setUsersFilters(filters);
+    setUsersPage(1);
+    await fetchUsers(1, usersPageSize, search, filters);
+  }, [fetchUsers, search, usersPageSize]);
+
+  const handleSelectUser = useCallback((userId: string, selected: boolean) => {
+    setSelectedUsers((prev) => {
+      if (selected) {
+        return prev.includes(userId) ? prev : [...prev, userId];
+      }
+      return prev.filter((id) => id !== userId);
+    });
   }, []);
 
-  const onAuthSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!token.trim() || !email.trim()) {
-      setError('Enter admin token and admin email.');
-      return;
+  const handleSelectAllUsers = useCallback((selected: boolean) => {
+    if (selected && users.data?.users) {
+      const allIds = users.data.users.map((u) => u.id);
+      setSelectedUsers(allIds);
+    } else {
+      setSelectedUsers([]);
     }
-    setIsAuthorized(true);
-  };
+  }, [users.data]);
 
-  const onSearchUsers = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!isAuthorized) return;
-    setUsersPage(1);
-    setTab('users');
-    if (tab === 'users') {
-      await loadCurrentTabData('users');
-    }
-  };
-
-  const openUser = async (userId: string) => {
-    try {
-      setOpenUserId(userId);
-      setError('');
-      const controller = withAbortableKey('user-detail');
-      setUserDetail(await adminFetch<AdminUserDetail>(`/users/${userId}`, config, { signal: controller.signal }));
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      setError(err instanceof Error ? err.message : 'Failed to load user');
-    } finally {
-      setOpenUserId(null);
-    }
-  };
-
-  const closeUserDetail = () => setUserDetail(null);
-
-  const grantSubscription = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!grantModalUserId) return;
+  const handleBulkGrantSubscription = useCallback(async (userIds: string[]) => {
     const durationDays = Number(grantDurationDays);
     const planId = grantPlanId.trim();
     if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 3650) {
-      setError('Duration days must be between 1 and 3650.');
+      showError('Длительность должна быть от 1 до 3650 дней.');
+      return;
+    }
+    const result = await bulkGrantSubscription(userIds, durationDays, planId);
+    if (result) {
+      showSuccess(`Выдано подписок: ${result.succeeded}/${result.total}`);
+      if (result.failed > 0) {
+        showError(`Не удалось: ${result.failed}`);
+      }
+      setSelectedUsers([]);
+      void fetchUsers(usersPage, usersPageSize, search, usersFilters);
+    } else if (lastError) {
+      showError(lastError);
+    }
+  }, [bulkGrantSubscription, grantDurationDays, grantPlanId, fetchUsers, usersPage, usersPageSize, search, usersFilters, lastError, showError, showSuccess]);
+
+  const handleSaveFilter = useCallback((name: string) => {
+    const newFilter = { id: `filter-${Date.now()}`, name, filters: { ...usersFilters } };
+    setSavedFilters((prev) => [...prev, newFilter]);
+    showSuccess(`Фильтр "${name}" сохранён`);
+  }, [usersFilters, showSuccess]);
+
+  const handleLoadFilter = useCallback((id: string) => {
+    const filter = savedFilters.find((f) => f.id === id);
+    if (filter) {
+      setUsersFilters(filter.filters);
+      setUsersPage(1);
+      void fetchUsers(1, usersPageSize, search, filter.filters);
+    }
+  }, [savedFilters, fetchUsers, search, usersPageSize]);
+
+  const handleDeleteFilter = useCallback((id: string) => {
+    setSavedFilters((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const openUser = useCallback(async (userId: string) => {
+    setOpenUserId(userId);
+    await fetchUserDetail(userId);
+  }, [fetchUserDetail]);
+
+  const closeUserDetail = useCallback(() => {
+    setOpenUserId(null);
+  }, []);
+
+  const handleFetchUserWords = useCallback((userId: string, page = 1, searchQuery?: string) => {
+    void fetchUserWords(userId, page, 20, searchQuery);
+  }, [fetchUserWords]);
+
+  const handleFetchUserGroups = useCallback((userId: string, page = 1, searchQuery?: string) => {
+    void fetchUserGroups(userId, page, 20, searchQuery);
+  }, [fetchUserGroups]);
+
+  const handleFetchUserPayments = useCallback((userId: string, page = 1) => {
+    void fetchUserPayments(userId, page, 20);
+  }, [fetchUserPayments]);
+
+  const grantSubscriptionHandler = useCallback(async (userId: string) => {
+    const durationDays = Number(grantDurationDays);
+    const planId = grantPlanId.trim();
+    if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 3650) {
+      showError('Длительность должна быть от 1 до 3650 дней.');
       return;
     }
     if (!planId) {
-      setError('Plan id is required.');
+      showError('Выберите тариф.');
       return;
     }
-    try {
-      setMutationBusy(true);
-      await adminFetch(`/users/${grantModalUserId}/subscription`, config, {
-        method: 'PATCH',
-        body: JSON.stringify({ duration_days: durationDays, plan_id: planId }),
-      });
-      await openUser(grantModalUserId);
-      await loadCurrentTabData('users');
-      await loadCurrentTabData('audit');
-      setGrantModalUserId(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update subscription');
-    } finally {
-      setMutationBusy(false);
-    }
-  };
 
-  const resetWeeklyLimit = async (userId: string) => {
-    try {
-      setMutationBusy(true);
-      await adminFetch(`/users/${userId}/reset-weekly-limit`, config, { method: 'POST' });
+    const result = await grantSubscription(userId, durationDays, planId);
+    if (result) {
+      showSuccess(`Подписка выдана на ${durationDays} дней`);
       await openUser(userId);
-      await loadCurrentTabData('users');
-      await loadCurrentTabData('audit');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset weekly limit');
-    } finally {
-      setMutationBusy(false);
+      void fetchUsers(usersPage, usersPageSize, search, usersFilters);
+      void fetchAudit();
+    } else if (lastError) {
+      showError(lastError);
     }
-  };
+  }, [grantDurationDays, grantPlanId, grantSubscription, openUser, fetchUsers, fetchAudit, usersPage, usersPageSize, search, usersFilters, lastError, showError, showSuccess]);
+
+  const resetWeeklyLimitHandler = useCallback(async (userId: string) => {
+    const success = await resetWeeklyLimit(userId);
+    if (success) {
+      showSuccess('Недельный лимит сброшен');
+      await openUser(userId);
+      void fetchUsers(usersPage, usersPageSize, search, usersFilters);
+      void fetchAudit();
+    } else if (lastError) {
+      showError(lastError);
+    }
+  }, [resetWeeklyLimit, openUser, fetchUsers, fetchAudit, usersPage, usersPageSize, search, usersFilters, lastError, showError, showSuccess]);
+
+  const handleGlobalSearchSelect = useCallback(async (userId: string) => {
+    setTab('users');
+    await openUser(userId);
+    closeSearch();
+  }, [setTab, openUser, closeSearch]);
+
+  const handleUpdateEmail = useCallback(async (userId: string, email: string) => {
+    const result = await updateUserEmail(userId, email);
+    if (result) {
+      showSuccess(`Email изменён на ${email}`);
+      await openUser(userId);
+      void fetchUsers(usersPage, usersPageSize, search, usersFilters);
+      void fetchAudit();
+    } else if (lastError) {
+      showError(lastError);
+      throw new Error(lastError);
+    }
+  }, [updateUserEmail, openUser, fetchUsers, fetchAudit, usersPage, usersPageSize, search, usersFilters, lastError, showError, showSuccess]);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      openSearch();
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      if (openUserId) {
+        setOpenUserId(null);
+        return;
+      }
+      if (isSearchOpen) {
+        closeSearch();
+        return;
+      }
+      if (grantModalUserId) {
+        setGrantModalUserId(null);
+        return;
+      }
+      return;
+    }
+
+    const tabs: AdminTab[] = ['overview', 'users', 'payments', 'consents', 'audit'];
+    const number = parseInt(e.key, 10);
+    if (number >= 1 && number <= 5 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const target = document.activeElement;
+      const isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+      if (!isInput) {
+        e.preventDefault();
+        setTab(tabs[number - 1]);
+      }
+    }
+  }, [openSearch, openUserId, isSearchOpen, grantModalUserId, closeSearch, setTab]);
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   if (!isAuthorized) {
-    return (
-      <div className="auth-page">
-        <div className="auth-card">
-          <h2>Admin Access</h2>
-          <p>Sign in to your admin console</p>
-          {error && <div className="error-banner">{error}</div>}
-          <form onSubmit={onAuthSubmit}>
-            <div className="form-group">
-              <label htmlFor="email">Email</label>
-              <input
-                id="email"
-                className="form-input"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                type="email"
-                placeholder="admin@example.com"
-                autoComplete="off"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="token">API Token</label>
-              <input
-                id="token"
-                className="form-input"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                type="password"
-                placeholder="Enter your admin token"
-                autoComplete="off"
-              />
-            </div>
-            <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>
-              Sign In
-            </button>
-          </form>
-        </div>
-      </div>
-    );
+    return <AuthForm onLogin={login} />;
   }
 
   return (
     <div className="app-layout">
-      <aside className="sidebar">
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">S</div>
-          SmartWord
-        </div>
-        <nav className="sidebar-nav">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item ${tab === item.id ? 'active' : ''}`}
-              onClick={() => setTab(item.id)}
-            >
-              <span className="nav-item-icon">{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <div className="text-sm text-muted">{email}</div>
-        </div>
-      </aside>
+      <Sidebar
+        activeTab={tab}
+        onTabChange={handleTabChange}
+        onLogout={logout}
+        onOpenSearch={openSearch}
+      />
 
       <main className="main-content">
-        <div className="topbar">
-          <h1>{NAV_ITEMS.find((n) => n.id === tab)?.label ?? 'Admin'}</h1>
-          <div className="topbar-actions">
-            <button className="btn btn-ghost" onClick={() => void loadCurrentTabData(tab)}>
-              ↻ Refresh
-            </button>
-          </div>
-        </div>
+        <TopBar
+          title={NAV_ITEMS.find((n) => n.id === tab)?.label ?? 'Admin'}
+          onRefresh={() => { void loadCurrentTab(true); setLastRefreshed(new Date()); }}
+          lastRefreshed={lastRefreshed}
+          autoRefresh={autoRefresh}
+          onToggleAutoRefresh={() => setAutoRefresh((prev) => !prev)}
+        />
 
-        {error && <div className="error-banner">{error}</div>}
-
-        {tab === 'overview' && <OverviewTab overview={overview} isLoading={loadingByTab.overview} />}
-        {tab === 'users' && (
-          <UsersTab
-            users={users}
-            search={search}
-            onSearchChange={setSearch}
-            onSearchSubmit={onSearchUsers}
-            onPageChange={setUsersPage}
-            onOpenUser={openUser}
-            isLoading={loadingByTab.users}
-            openUserId={openUserId}
+        {tab === 'overview' && (
+          <OverviewTab
+            overview={overview.data}
+            isLoading={overview.isLoading}
+            period={period}
+            onPeriodChange={setPeriod}
+            config={config}
+            onMetricClick={handleOverviewMetricClick}
           />
         )}
-        {tab === 'payments' && <PaymentsTab data={payments} isLoading={loadingByTab.payments} />}
-        {tab === 'consents' && <ConsentsTab data={consents} isLoading={loadingByTab.consents} />}
-        {tab === 'audit' && <AuditTab data={audit} isLoading={loadingByTab.audit} />}
+
+        {tab === 'users' && (
+          <UsersTab
+            users={users.data}
+            search={search}
+            filters={usersFilters}
+            onSearchChange={setSearch}
+            onSearchSubmit={handleSearchUsers}
+            onFiltersChange={handleUsersFiltersChange}
+            onPageChange={handleUsersPageChange}
+            onOpenUser={openUser}
+            isLoading={users.isLoading}
+            openUserId={openUserId}
+            selectedUsers={selectedUsers}
+            onSelectUser={handleSelectUser}
+            onSelectAll={handleSelectAllUsers}
+            onBulkGrantSubscription={handleBulkGrantSubscription}
+            onSaveFilter={handleSaveFilter}
+            savedFilters={savedFilters.map((f) => ({ id: f.id, name: f.name }))}
+            onLoadFilter={handleLoadFilter}
+            onDeleteFilter={handleDeleteFilter}
+          />
+        )}
+
+        {tab === 'payments' && (
+          <PaymentsTab
+            data={payments.data}
+            isLoading={payments.isLoading}
+            period={period}
+            onPeriodChange={setPeriod}
+            onPageChange={setPaymentsPage}
+            onSearch={setPaymentsSearch}
+            onStatusFilter={setPaymentsStatus}
+          />
+        )}
+
+        {tab === 'consents' && (
+          <ConsentsTab
+            data={consents.data}
+            isLoading={consents.isLoading}
+            period={period}
+            onPeriodChange={setPeriod}
+            onPageChange={setConsentsPage}
+            onSearch={setConsentsSearch}
+            onTypeFilter={setConsentsType}
+            onGrantedFilter={setConsentsGranted}
+          />
+        )}
+
+        {tab === 'audit' && (
+          <AuditTab
+            data={audit.data}
+            isLoading={audit.isLoading}
+            period={period}
+            onPeriodChange={setPeriod}
+            onPageChange={setAuditPage}
+            onSearch={setAuditSearch}
+            onActionFilter={setAuditAction}
+            onOutcomeFilter={setAuditOutcome}
+          />
+        )}
+
+        {tab === 'tickets' && (
+          <TicketsTab
+            data={tickets.data}
+            isLoading={tickets.isLoading}
+            period={period}
+            onPeriodChange={setPeriod}
+            onPageChange={setTicketsPage}
+            onSearch={setTicketsSearch}
+            onStatusFilter={setTicketsStatus}
+            onPriorityFilter={setTicketsPriority}
+          />
+        )}
+
+        {tab === 'errorLogs' && (
+          <ErrorLogsTab
+            data={errorLogs.data}
+            isLoading={errorLogs.isLoading}
+            period={period}
+            onPeriodChange={setPeriod}
+            onPageChange={setErrorLogsPage}
+            onSearch={setErrorLogsSearch}
+            onTypeFilter={setErrorLogsType}
+            onResolvedFilter={setErrorLogsResolved}
+          />
+        )}
       </main>
 
-      {userDetail && (
+      {userDetail.data && (
         <UserDetailPanel
-          userDetail={userDetail}
+          userDetail={userDetail.data}
+          userWords={userWords.data}
+          userGroups={userGroups.data}
+          userPayments={userPayments.data}
+          wordsLoading={userWords.isLoading}
+          groupsLoading={userGroups.isLoading}
+          paymentsLoading={userPayments.isLoading}
           onClose={closeUserDetail}
           onGrantSubscription={(userId) => setGrantModalUserId(userId)}
-          onResetWeeklyLimit={resetWeeklyLimit}
+          onResetWeeklyLimit={resetWeeklyLimitHandler}
+          onUpdateEmail={handleUpdateEmail}
+          onFetchWords={handleFetchUserWords}
+          onFetchGroups={handleFetchUserGroups}
+          onFetchPayments={handleFetchUserPayments}
           mutationBusy={mutationBusy}
         />
       )}
 
       {grantModalUserId && (
-        <Modal
-          title="Grant Subscription"
-          confirmLabel="Apply"
+        <SubscriptionModal
+          duration={grantDurationDays}
+          planId={grantPlanId}
+          onDurationChange={setGrantDurationDays}
+          onPlanIdChange={setGrantPlanId}
+          onConfirm={() => grantSubscriptionHandler(grantModalUserId)}
           onCancel={() => setGrantModalUserId(null)}
-          onConfirm={grantSubscription}
-          isBusy={mutationBusy}
-          isConfirmDisabled={!grantPlanId.trim() || !grantDurationDays.trim()}
-        >
+        />
+      )}
+
+      <GlobalSearchModal
+        isOpen={isSearchOpen}
+        onClose={closeSearch}
+        onSelectUser={handleGlobalSearchSelect}
+        query={query}
+        setQuery={setQuery}
+        results={results}
+        isLoading={searchLoading}
+        error={searchError}
+        onSearch={performSearch}
+        searchType={searchType}
+        onSearchTypeChange={setSearchType}
+      />
+
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
+    </div>
+  );
+}
+
+interface AuthFormProps {
+  onLogin: (email: string, token: string) => void;
+}
+
+function AuthForm({ onLogin }: AuthFormProps) {
+  const [email, setEmail] = useState('');
+  const [token, setToken] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token.trim() || !email.trim()) {
+      setError('Введите токен и email.');
+      return;
+    }
+    onLogin(email, token);
+  };
+
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <h2>Админ-панель</h2>
+        <p>Вход в панель управления</p>
+        {error && <div className="error-banner">{error}</div>}
+        <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="duration">Duration (days)</label>
+            <label htmlFor="email">Email</label>
             <input
+              id="email"
+              className="form-input"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              placeholder="admin@example.com"
+              autoComplete="off"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="token">API токен</label>
+            <input
+              id="token"
+              className="form-input"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              type="password"
+              placeholder="Введите API токен"
+              autoComplete="off"
+            />
+          </div>
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }}>
+            Войти
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+interface SidebarProps {
+  activeTab: AdminTab;
+  onTabChange: (tab: AdminTab) => void;
+  onLogout: () => void;
+  onOpenSearch: () => void;
+}
+
+function Sidebar({ activeTab, onTabChange, onLogout, onOpenSearch }: SidebarProps) {
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-logo">
+        <div className="sidebar-logo-icon">S</div>
+        SmartWord
+      </div>
+
+      <nav className="sidebar-nav">
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
+            onClick={() => onTabChange(item.id)}
+          >
+            <span className="nav-item-icon">
+              <item.Icon size={18} />
+            </span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="sidebar-search-hint">
+        <button type="button" className="btn btn-ghost" onClick={onOpenSearch}>
+          <Search size={16} />
+          <span>Поиск</span>
+          <kbd>⌘K</kbd>
+        </button>
+      </div>
+
+      <div className="sidebar-footer">
+        <div className="keyboard-hints">
+          <span><kbd>1-5</kbd> табы</span>
+          <span><kbd>Esc</kbd> закрыть</span>
+        </div>
+        <button type="button" className="btn btn-ghost" onClick={onLogout}>
+          Выйти
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+interface TopBarProps {
+  title: string;
+  onRefresh: () => void;
+  lastRefreshed: Date | null;
+  autoRefresh: boolean;
+  onToggleAutoRefresh: () => void;
+}
+
+function TopBar({ title, onRefresh, lastRefreshed, autoRefresh, onToggleAutoRefresh }: TopBarProps) {
+  const formatTime = (date: Date) => date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className="topbar">
+      <h1>{title}</h1>
+      <div className="topbar-actions">
+        {lastRefreshed && (
+          <span className="last-refreshed">
+            Обновлено: {formatTime(lastRefreshed)}
+          </span>
+        )}
+        <button
+          type="button"
+          className={`btn btn-ghost ${autoRefresh ? 'active' : ''}`}
+          onClick={onToggleAutoRefresh}
+          title="Автообновление (каждые 60 сек)"
+        >
+          🔄 {autoRefresh ? 'Вкл' : 'Выкл'}
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={onRefresh}>
+          ↻ Обновить
+        </button>
+      </div>
+    </div>
+  );
+}
+
+interface SubscriptionModalProps {
+  duration: string;
+  planId: string;
+  onDurationChange: (value: string) => void;
+  onPlanIdChange: (value: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function SubscriptionModal({
+  duration,
+  planId,
+  onDurationChange,
+  onPlanIdChange,
+  onConfirm,
+  onCancel,
+}: SubscriptionModalProps) {
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Выдать подписку</h3>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label htmlFor="duration">Длительность (дней)</label>
+            <select
               id="duration"
               className="form-input"
-              value={grantDurationDays}
-              onChange={(e) => setGrantDurationDays(e.target.value)}
-              type="number"
-              min={1}
-              max={3650}
-            />
+              value={duration}
+              onChange={(e) => onDurationChange(e.target.value)}
+            >
+              <option value="7">7 дней</option>
+              <option value="30">30 дней</option>
+              <option value="90">90 дней</option>
+              <option value="180">180 дней</option>
+              <option value="365">365 дней</option>
+            </select>
           </div>
           <div className="form-group">
-            <label htmlFor="planId">Plan ID</label>
-            <input
+            <label htmlFor="planId">Тариф</label>
+            <select
               id="planId"
               className="form-input"
-              value={grantPlanId}
-              onChange={(e) => setGrantPlanId(e.target.value)}
-              placeholder="manual"
-            />
+              value={planId}
+              onChange={(e) => onPlanIdChange(e.target.value)}
+            >
+              <option value="manual">Manual</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
           </div>
-        </Modal>
-      )}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onCancel}>
+            Отмена
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onConfirm}>
+            Выдать
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ToastContainerProps {
+  toasts: Toast[];
+  onRemove: (id: string) => void;
+}
+
+function ToastContainer({ toasts, onRemove }: ToastContainerProps) {
+  if (toasts.length === 0) return null;
+
+  return (
+    <div className="toast-container">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`toast toast-${toast.type}`}>
+          <span>{toast.message}</span>
+          <button type="button" className="toast-close" onClick={() => onRemove(toast.id)}>
+            ×
+          </button>
+        </div>
+      ))}
     </div>
   );
 }

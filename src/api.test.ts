@@ -21,6 +21,7 @@ describe('adminFetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.headers).toMatchObject({
+      Authorization: 'Bearer tkn',
       'x-admin-token': 'tkn',
       'x-admin-email': 'admin@localhost',
     });

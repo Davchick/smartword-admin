@@ -15,7 +15,7 @@ export function Modal({
   title,
   children,
   confirmLabel,
-  cancelLabel = 'Cancel',
+  cancelLabel = 'Отмена',
   onCancel,
   onConfirm,
   isBusy = false,
@@ -31,7 +31,7 @@ export function Modal({
             {cancelLabel}
           </button>
           <button type="submit" className="btn btn-primary" disabled={isBusy || isConfirmDisabled}>
-            {isBusy ? 'Working...' : confirmLabel}
+            {isBusy ? 'Загрузка...' : confirmLabel}
           </button>
         </div>
       </form>
